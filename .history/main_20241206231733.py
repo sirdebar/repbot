@@ -67,19 +67,17 @@ async def start_handler(message: types.Message, state: FSMContext):
     tg_id = message.from_user.id
     username = message.from_user.username or f"user_{tg_id}"
 
-    # Проверяем пользователя в базе
+    # Проверяем, прошел ли пользователь капчу
     user = get_user_by_tg_id(tg_id)
-    if user:
-        _, _, _, captcha_passed = user  # Распаковываем значения
-        if captcha_passed:  # Если капча уже пройдена
-            await message.answer(
-                bold(f"Добро пожаловать, {message.from_user.full_name}!\n"
-                     f"Ваш профиль активен."),
-                reply_markup=main_menu
-            )
-            return
+    if user and user[-1]:  # Если поле captcha_passed = True
+        await message.answer(
+            bold(f"Добро пожаловать, {message.from_user.full_name}!\n"
+                 f"Ваш профиль активен."),
+            reply_markup=main_menu
+        )
+        return
 
-    # Если пользователя нет или капча не пройдена, показываем капчу
+    # Генерируем капчу
     correct_emoji = random.choice(EMOJIS)  # Смайлик, который нужно нажать
     shuffled_emojis = random.sample(EMOJIS, len(EMOJIS))  # Перемешиваем массив
     buttons = [[InlineKeyboardButton(text=emoji, callback_data=f"captcha_{emoji}")]
@@ -108,9 +106,11 @@ async def captcha_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.answer("Капча пройдена!", show_alert=True)
 
-        # Обновляем статус прохождения капчи
+        # Продолжение создания профиля
         tg_id = callback.from_user.id
         username = callback.from_user.username or f"user_{tg_id}"
+
+        # Обновляем статус прохождения капчи
         create_or_get_user(tg_id, username)
         update_captcha_status(tg_id, True)
 
@@ -134,7 +134,6 @@ async def captcha_handler(callback: types.CallbackQuery, state: FSMContext):
             bold(f"Капча: Нажмите на кнопку с этим смайликом {correct_emoji}"),
             reply_markup=markup
         )
-
 
 
 # Обработчик кнопки "Профиль"

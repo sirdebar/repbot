@@ -82,7 +82,7 @@ def update_username(tg_id: int, username: str):
     logger.info(f"Username пользователя {tg_id} обновлен на @{username}.")
 
 def get_user_by_tg_id(tg_id: int):
-    cursor.execute("SELECT tg_id, username, reputation, captcha_passed FROM users WHERE tg_id = ?", (tg_id,))
+    cursor.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
     return cursor.fetchone()
 
 def get_user_by_username(username: str):
@@ -94,10 +94,9 @@ def create_or_get_user(tg_id: int, username: str):
     if not user:
         user = get_user_by_username(username)
         if not user:
-            add_user(tg_id, username)
+            add_user(tg_id, username)  # Здесь добавляется пользователь в таблицу users
             user = get_user_by_tg_id(tg_id)
     return user
-
 
 def update_reputation(target_id: int, value: int):
     cursor.execute("UPDATE users SET reputation = reputation + ? WHERE tg_id = ?", (value, target_id))

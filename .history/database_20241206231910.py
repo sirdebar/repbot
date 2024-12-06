@@ -82,7 +82,7 @@ def update_username(tg_id: int, username: str):
     logger.info(f"Username пользователя {tg_id} обновлен на @{username}.")
 
 def get_user_by_tg_id(tg_id: int):
-    cursor.execute("SELECT tg_id, username, reputation, captcha_passed FROM users WHERE tg_id = ?", (tg_id,))
+    cursor.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
     return cursor.fetchone()
 
 def get_user_by_username(username: str):

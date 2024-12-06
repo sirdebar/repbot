@@ -96,6 +96,7 @@ async def start_handler(message: types.Message, state: FSMContext):
         reply_markup=markup
     )
 
+
 @router.callback_query(F.data.startswith("captcha_"))
 async def captcha_handler(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -108,9 +109,11 @@ async def captcha_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.answer("Капча пройдена!", show_alert=True)
 
-        # Обновляем статус прохождения капчи
+        # Продолжение создания профиля
         tg_id = callback.from_user.id
         username = callback.from_user.username or f"user_{tg_id}"
+
+        # Обновляем статус прохождения капчи
         create_or_get_user(tg_id, username)
         update_captcha_status(tg_id, True)
 
@@ -134,7 +137,6 @@ async def captcha_handler(callback: types.CallbackQuery, state: FSMContext):
             bold(f"Капча: Нажмите на кнопку с этим смайликом {correct_emoji}"),
             reply_markup=markup
         )
-
 
 
 # Обработчик кнопки "Профиль"

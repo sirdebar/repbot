@@ -13,7 +13,6 @@ cursor = conn.cursor()
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     tg_id INTEGER PRIMARY KEY,
-    captcha_passed BOOLEAN DEFAULT FALSE,
     username TEXT,
     reputation INTEGER DEFAULT 0
 )
@@ -36,14 +35,6 @@ CREATE TABLE IF NOT EXISTS reviews (
 )
 """)
 conn.commit()
-
-def update_captcha_status(tg_id: int, status: bool):
-    """
-    Обновляет статус прохождения капчи для пользователя.
-    """
-    cursor.execute("UPDATE users SET captcha_passed = ? WHERE tg_id = ?", (status, tg_id))
-    conn.commit()
-
 
 def update_related_tg_id(old_tg_id: int, new_tg_id: int):
     """
@@ -82,7 +73,7 @@ def update_username(tg_id: int, username: str):
     logger.info(f"Username пользователя {tg_id} обновлен на @{username}.")
 
 def get_user_by_tg_id(tg_id: int):
-    cursor.execute("SELECT tg_id, username, reputation, captcha_passed FROM users WHERE tg_id = ?", (tg_id,))
+    cursor.execute("SELECT * FROM users WHERE tg_id = ?", (tg_id,))
     return cursor.fetchone()
 
 def get_user_by_username(username: str):
@@ -94,10 +85,9 @@ def create_or_get_user(tg_id: int, username: str):
     if not user:
         user = get_user_by_username(username)
         if not user:
-            add_user(tg_id, username)
+            add_user(tg_id, username)  # Здесь добавляется пользователь в таблицу users
             user = get_user_by_tg_id(tg_id)
     return user
-
 
 def update_reputation(target_id: int, value: int):
     cursor.execute("UPDATE users SET reputation = reputation + ? WHERE tg_id = ?", (value, target_id))

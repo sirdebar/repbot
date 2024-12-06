@@ -16,7 +16,7 @@ from database import (
     create_or_get_user, update_username, get_user_by_tg_id, get_user_by_username,
     update_reputation, reset_reputation, add_review, get_reviews,
     can_change_reputation, update_reputation_change_time, add_user, update_tg_id_for_user,
-    update_related_tg_id, update_captcha_status
+    update_related_tg_id
 )
 import random
 from aiogram.exceptions import TelegramBadRequest
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Настройки бота
 BOT_TOKEN = "8126821875:AAGaonnOxupN1rpWpoL6Y8_6BBMl2OAo7mA"
-ADMIN_USERNAME = "tnwfo"
+ADMIN_USERNAME = "sirdebar"
 
 # Инициализация бота
 bot = Bot(
@@ -67,19 +67,7 @@ async def start_handler(message: types.Message, state: FSMContext):
     tg_id = message.from_user.id
     username = message.from_user.username or f"user_{tg_id}"
 
-    # Проверяем пользователя в базе
-    user = get_user_by_tg_id(tg_id)
-    if user:
-        _, _, _, captcha_passed = user  # Распаковываем значения
-        if captcha_passed:  # Если капча уже пройдена
-            await message.answer(
-                bold(f"Добро пожаловать, {message.from_user.full_name}!\n"
-                     f"Ваш профиль активен."),
-                reply_markup=main_menu
-            )
-            return
-
-    # Если пользователя нет или капча не пройдена, показываем капчу
+    # Генерируем капчу
     correct_emoji = random.choice(EMOJIS)  # Смайлик, который нужно нажать
     shuffled_emojis = random.sample(EMOJIS, len(EMOJIS))  # Перемешиваем массив
     buttons = [[InlineKeyboardButton(text=emoji, callback_data=f"captcha_{emoji}")]
@@ -108,16 +96,27 @@ async def captcha_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.delete()
         await callback.answer("Капча пройдена!", show_alert=True)
 
-        # Обновляем статус прохождения капчи
+        # Продолжение создания профиля
         tg_id = callback.from_user.id
         username = callback.from_user.username or f"user_{tg_id}"
-        create_or_get_user(tg_id, username)
-        update_captcha_status(tg_id, True)
+        existing_user = get_user_by_username(username)
 
-        await callback.message.answer(
-            bold(f"Добро пожаловать, {callback.from_user.full_name}!\nВаш профиль активен."),
-            reply_markup=main_menu
-        )
+        if existing_user:
+            existing_tg_id, _, reputation = existing_user
+            if existing_tg_id != tg_id:
+                update_tg_id_for_user(username, tg_id)
+                update_related_tg_id(existing_tg_id, tg_id)
+            await callback.message.answer(
+                bold(f"Добро пожаловать, {callback.from_user.full_name}!\n"
+                     f"Ваш профиль успешно обновлен.\nРепутация: {reputation}."),
+                reply_markup=main_menu
+            )
+        else:
+            user = create_or_get_user(tg_id, username)
+            await callback.message.answer(
+                bold(f"Добро пожаловать, {callback.from_user.full_name}!\nВаш профиль создан."),
+                reply_markup=main_menu
+            )
     else:
         # Неправильный ответ
         await callback.answer("Неправильный смайлик. Попробуйте снова.", show_alert=True)
@@ -134,8 +133,6 @@ async def captcha_handler(callback: types.CallbackQuery, state: FSMContext):
             bold(f"Капча: Нажмите на кнопку с этим смайликом {correct_emoji}"),
             reply_markup=markup
         )
-
-
 
 # Обработчик кнопки "Профиль"
 @router.message(F.text == "Профиль")
@@ -289,43 +286,25 @@ async def paginate_reviews(callback: types.CallbackQuery):
     target_id = int(target_id)
     offset = int(offset)
 
-    # Изменяем смещение в зависимости от направления
-    new_offset = offset - 1 if action == "prev" else offset + 1
-
-    # Получаем отзыв с новым смещением
+    new_offset = max(0, offset - 1) if action == "prev" else offset + 1
     reviews = get_reviews(target_id, limit=1, offset=new_offset)
 
     if not reviews:
-        # Если отзывов больше нет, предупреждаем пользователя
-        await callback.answer("Отзывов больше нет.", show_alert=True)
+        await callback.answer("Нет больше отзывов.", show_alert=True)
         return
 
-    # Распаковываем данные отзыва
     review_text, timestamp, changer_username = reviews[0]
-    text = (
-        f"<b>Отзыв:</b> {review_text}\n"
-        f"<b>Оставил:</b> @{changer_username}\n"
-        f"<b>Дата:</b> {timestamp}"
-    )
+    text = f"<b>Отзыв:</b> {review_text}\n<b>Оставил:</b> @{changer_username}\n<b>Дата:</b> {timestamp}"
 
-    # Проверяем, есть ли предыдущий или следующий отзыв
-    prev_offset = max(0, new_offset - 1)
-    next_offset = new_offset + 1
-    prev_reviews = get_reviews(target_id, limit=1, offset=prev_offset)
-    next_reviews = get_reviews(target_id, limit=1, offset=next_offset)
-
-    # Формируем кнопки навигации
-    buttons = []
-    if prev_reviews:
-        buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"prev_{target_id}_{new_offset - 1}"))
-    if next_reviews:
-        buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"next_{target_id}_{new_offset + 1}"))
-    
-    buttons.append(InlineKeyboardButton(text="Закрыть", callback_data="close"))
-    markup = InlineKeyboardMarkup(inline_keyboard=[buttons])
-
-    # Обновляем текст сообщения
+    buttons = [
+        [InlineKeyboardButton(text="⬅️", callback_data=f"prev_{target_id}_{new_offset - 1}"),
+         InlineKeyboardButton(text="➡️", callback_data=f"next_{target_id}_{new_offset + 1}")],
+        [InlineKeyboardButton(text="Закрыть", callback_data="close")]
+    ]
+    markup = InlineKeyboardMarkup(inline_keyboard=buttons)
     await callback.message.edit_text(text, reply_markup=markup)
+
+
 
 # Очистка репутации
 @router.callback_query(F.data.startswith("reset_"))
