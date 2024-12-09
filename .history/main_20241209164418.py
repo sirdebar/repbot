@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Настройки бота
 BOT_TOKEN = "8029759498:AAHCxnt6uJ68axAzcPDSP3nCBCdiWBDyo5I"
-ADMIN_USERNAMES = ["tnwfo", "DxxmII"]
+ADMIN_USERNAMES = [= "tnwfo", "DxxmII"]
 
 # Инициализация бота
 bot = Bot(
