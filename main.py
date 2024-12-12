@@ -1,4 +1,5 @@
 import asyncio
+import os
 import logging
 from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import Command
@@ -20,14 +21,17 @@ from database import (
     get_profile_view_count, cursor
 )
 import random
+from dotenv import load_dotenv
 from aiogram.exceptions import TelegramBadRequest
 
 # Логирование
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+load_dotenv()
+
 # Настройки бота
-BOT_TOKEN = "8029759498:AAHCxnt6uJ68axAzcPDSP3nCBCdiWBDyo5I"
+BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_USERNAMES = ["tnwfo", "DxxmII"]
 
 # Инициализация бота
