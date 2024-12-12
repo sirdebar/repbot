@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS reviews (
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """)
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS profile_views (
+    target_id INTEGER,
+    viewer_id INTEGER,
+    PRIMARY KEY (target_id, viewer_id)
+);
+
+""")
 conn.commit()
 
 def delete_reviews_for_user(target_id: int):
@@ -165,3 +173,17 @@ def update_reputation_change_time(changer_id: int, target_id: int):
         VALUES (?, ?, ?)
     """, (changer_id, target_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
+
+def increment_profile_views(target_id: int, viewer_id: int):
+    cursor.execute("""
+        INSERT OR IGNORE INTO profile_views (target_id, viewer_id)
+        VALUES (?, ?)
+    """, (target_id, viewer_id))
+    conn.commit()
+
+def get_profile_view_count(target_id: int):
+    cursor.execute("""
+        SELECT COUNT(*) FROM profile_views
+        WHERE target_id = ?
+    """, (target_id,))
+    return cursor.fetchone()[0]
