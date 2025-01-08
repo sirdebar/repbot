@@ -2,6 +2,7 @@
 import sqlite3
 import logging
 from datetime import datetime, timedelta
+import pytz
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,8 @@ CREATE TABLE IF NOT EXISTS reviews (
     target_id INTEGER,
     changer_id INTEGER,
     review TEXT,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    action TEXT DEFAULT '+REP'
 )
 """)
 cursor.execute("""
@@ -134,18 +136,24 @@ def reset_reputation(target_id: int):
     cursor.execute("UPDATE users SET reputation = 0 WHERE tg_id = ?", (target_id,))
     conn.commit()
 
-def add_review(target_id: int, changer_id: int, review: str):
-    try:
-        cursor.execute("INSERT INTO reviews (target_id, changer_id, review) VALUES (?, ?, ?)",
-                       (target_id, changer_id, review))
-        conn.commit()
-    except sqlite3.Error as e:
-        logger.error(f"Ошибка при добавлении отзыва: {e}")
-
-
-def get_reviews(target_id: int, limit: int, offset: int):
+def add_review(target_id: int, changer_id: int, review: str, action: str):
+    """
+    Добавление отзыва в базу данных.
+    """
     cursor.execute("""
-        SELECT reviews.review, reviews.timestamp, 
+        INSERT INTO reviews (target_id, changer_id, review, action) 
+        VALUES (?, ?, ?, ?)
+    """, (target_id, changer_id, review, action))
+    conn.commit()
+
+
+def get_reviews(target_id: int, limit: int = 1, offset: int = 0):
+    """
+    Получение отзывов пользователя с учетом смещения и лимита.
+    Конвертация времени в часовой пояс МСК.
+    """
+    cursor.execute("""
+        SELECT reviews.review, reviews.timestamp, reviews.action,
                COALESCE(users.username, 'Unknown') AS username
         FROM reviews
         LEFT JOIN users ON reviews.changer_id = users.tg_id
@@ -153,9 +161,23 @@ def get_reviews(target_id: int, limit: int, offset: int):
         ORDER BY reviews.timestamp DESC
         LIMIT ? OFFSET ?
     """, (target_id, limit, offset))
-    return cursor.fetchall()
+    reviews = cursor.fetchall()
 
-def can_change_reputation(changer_id: int, target_id: int):
+    # Конвертация времени из UTC в МСК
+    msk_tz = pytz.timezone("Europe/Moscow")
+    reviews_with_msk_time = []
+    for review in reviews:
+        review_text, timestamp, action, username = review
+        utc_time = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+        msk_time = utc_time.replace(tzinfo=pytz.utc).astimezone(msk_tz).strftime("%Y-%m-%d %H:%M:%S")
+        reviews_with_msk_time.append((review_text, msk_time, action, username))
+
+    return reviews_with_msk_time
+
+def can_change_reputation(changer_id: int, target_id: int) -> bool:
+    """
+    Проверяет, может ли пользователь изменить репутацию другого пользователя.
+    """
     cursor.execute("""
         SELECT last_change FROM reputation_changes
         WHERE changer_id = ? AND target_id = ?
@@ -164,10 +186,14 @@ def can_change_reputation(changer_id: int, target_id: int):
 
     if result:
         last_change = datetime.strptime(result[0], "%Y-%m-%d %H:%M:%S")
-        return datetime.now() - last_change > timedelta(weeks=1)
+        # Ограничение на 5 секунд (или неделя в финальной версии)
+        return datetime.now() - last_change > timedelta(days=7)
     return True
 
 def update_reputation_change_time(changer_id: int, target_id: int):
+    """
+    Обновляет запись о последнем изменении репутации.
+    """
     cursor.execute("""
         INSERT OR REPLACE INTO reputation_changes (changer_id, target_id, last_change)
         VALUES (?, ?, ?)

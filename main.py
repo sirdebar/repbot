@@ -1,4 +1,5 @@
 import asyncio
+import pytz
 import os
 import logging
 from aiogram import Bot, Dispatcher, Router, types, F
@@ -22,6 +23,7 @@ from database import (
 )
 import random
 from dotenv import load_dotenv
+from datetime import datetime
 from aiogram.exceptions import TelegramBadRequest
 
 # Логирование
@@ -310,7 +312,7 @@ async def reputation_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Вы не можете изменять свою репутацию.", show_alert=True)
         return
 
-    # Запрещаем изменение репутации администраторам
+    # Проверяем, что цель не администратор
     target_user = get_user_by_tg_id(target_id)
     if target_user and target_user[1] in ADMIN_USERNAMES:
         await callback.answer("Нельзя изменить репутацию администратору.", show_alert=True)
@@ -320,10 +322,10 @@ async def reputation_handler(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Вы можете изменять репутацию этого пользователя только раз в неделю.", show_alert=True)
         return
 
+    # Запрос отзыва
     await callback.message.edit_text(bold("Оставьте отзыв о работнике (от 5 до 40 слов):"))
     await state.set_state(ReviewStates.waiting_for_review)
     await state.update_data(target_id=target_id, action=action, changer_id=callback.from_user.id)
-
 
 @router.message(ReviewStates.waiting_for_review)
 async def handle_review_input(message: types.Message, state: FSMContext):
@@ -333,21 +335,25 @@ async def handle_review_input(message: types.Message, state: FSMContext):
     changer_id = data["changer_id"]
     review = message.text.strip()
 
+    # Проверка длины отзыва
     if not (5 <= len(review.split()) <= 40):
         await message.answer(bold("Отзыв должен содержать от 5 до 40 слов. Попробуйте снова:"))
         return
 
-    # Убедиться, что пользователь, оставляющий отзыв, есть в базе
+    # Создание пользователя, если он отсутствует
     create_or_get_user(changer_id, message.from_user.username or f"user_{changer_id}")
 
-    update_reputation(target_id, 1 if action == "add" else -1)
-    add_review(target_id, changer_id, review)
-    update_reputation_change_time(changer_id, target_id)
+    # Обновление репутации
+    if can_change_reputation(changer_id, target_id):
+        update_reputation(target_id, 1 if action == "add" else -1)
+        update_reputation_change_time(changer_id, target_id)
+
+    # Добавление нового отзыва
+    add_review(target_id, changer_id, review, '+REP' if action == 'add' else '-REP')
 
     user = get_user_by_tg_id(target_id)
-    await message.answer(bold(f"Репутация пользователя @{user[1]} успешно обновлена."))
+    await message.answer(bold(f"Репутация пользователя @{user[1]} успешно обновлена, отзыв добавлен."))    
     await state.clear()
-
 
 # Отображение отзывов
 @router.callback_query(F.data.startswith("reviews_"))
@@ -359,17 +365,20 @@ async def show_reviews(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(bold("Отзывов пока нет."))
         return
 
-    review_text, timestamp, changer_username = reviews[0]
-    emoji = "🟢" if "+rep" in review_text.lower() else "🔴"
+    review_text, timestamp, action, changer_username = reviews[0]
+    emoji = "🟢" if action == "+REP" else "🔴"
+
     text = (
         f"{emoji} <b>Отзыв:</b> {review_text}\n"
         f"<b>Оставил:</b> @{changer_username}\n"
-        f"<b>Дата:</b> {timestamp}"
+        f"<b>Дата:</b> {timestamp} (МСК)"
     )
 
     buttons = [
-        [InlineKeyboardButton(text="⬅️", callback_data=f"prev_{target_id}_0"),
-         InlineKeyboardButton(text="➡️", callback_data=f"next_{target_id}_1")],
+        [
+            InlineKeyboardButton(text="⬅️", callback_data=f"prev_{target_id}_0"),
+            InlineKeyboardButton(text="➡️", callback_data=f"next_{target_id}_1"),
+        ],
         [InlineKeyboardButton(text="Назад", callback_data=f"back_{target_id}")]
     ]
     markup = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -413,18 +422,18 @@ async def paginate_reviews(callback: types.CallbackQuery):
         return
 
     # Распаковываем данные отзыва
-    review_text, timestamp, changer_username = reviews[0]
+    review_text, timestamp, action, changer_username = reviews[0]
+    emoji = "🟢" if action == "+REP" else "🔴"
+
     text = (
-        f"<b>Отзыв:</b> {review_text}\n"
+        f"{emoji} <b>Отзыв:</b> {review_text}\n"
         f"<b>Оставил:</b> @{changer_username}\n"
         f"<b>Дата:</b> {timestamp}"
     )
 
     # Проверяем, есть ли предыдущий или следующий отзыв
-    prev_offset = max(0, new_offset - 1)
-    next_offset = new_offset + 1
-    prev_reviews = get_reviews(target_id, limit=1, offset=prev_offset)
-    next_reviews = get_reviews(target_id, limit=1, offset=next_offset)
+    prev_reviews = get_reviews(target_id, limit=1, offset=new_offset - 1)
+    next_reviews = get_reviews(target_id, limit=1, offset=new_offset + 1)
 
     # Формируем кнопки навигации
     buttons = []
@@ -432,12 +441,12 @@ async def paginate_reviews(callback: types.CallbackQuery):
         buttons.append(InlineKeyboardButton(text="⬅️", callback_data=f"prev_{target_id}_{new_offset - 1}"))
     if next_reviews:
         buttons.append(InlineKeyboardButton(text="➡️", callback_data=f"next_{target_id}_{new_offset + 1}"))
-    
     buttons.append(InlineKeyboardButton(text="Закрыть", callback_data="close"))
     markup = InlineKeyboardMarkup(inline_keyboard=[buttons])
 
     # Обновляем текст сообщения
     await callback.message.edit_text(text, reply_markup=markup)
+
 
 # Очистка репутации
 @router.callback_query(F.data.startswith("reset_"))
